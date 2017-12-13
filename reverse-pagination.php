@@ -37,32 +37,23 @@ class WP_Reverse_Pagination {
 	}
 
 	// This will help in figuring out how to make this work https://ozthegreat.io/wordpress/wordpress-database-queries-speed-sql_calc_found_rows
-	public function action_pre_get_posts( $wp_query ) {
+	public function action_pre_get_posts( $query ) {
 		global $wpdb;
-		if ( is_admin() ) {
-			return $wp_query;
+		if ( is_admin() || ! $query->is_main_query() ) {
+			return $query;
 		}
 
-		$q = $wp_query->query_vars;
+		$q = $query->query_vars;
+		$query->set( 'no_found_rows', 1 );
 
-		if ( $wp_query->is_main_query() ) {
-
-			$wp_query->query_vars['no_found_rows'] = 1;
-
-			$order = strtoupper( $q['order'] );
-			if (
-				empty( $q['order'] ) ||
-				( $order != 'DESC' && $order != 'ASC' )
-			) {
-				$q['order'] = 'ASC';
-			}
-			if ( ! $q['paged'] ) {
-				// $q['order'] = 'DESC';
-			}
-
-			// $wp_query->set( 'order', $q['order'] );
-
+		if ( empty( $q['order'] ) || strtoupper( $q['order'] ) != 'DESC' ) {
+			$q['order'] = 'ASC';
 		}
+		if ( ! $q['paged'] ) {
+			// $q['order'] = 'DESC';
+		}
+
+		// $wp_query->set( 'order', $q['order'] );
 	}
 
 	public function action_wp_head() {
@@ -135,44 +126,45 @@ class WP_Reverse_Pagination {
 		$original_sql = $sql;
 		$q = $wp_query->query_vars;
 
-		if ( $wp_query->is_main_query() ) {
-
-			$pieces = explode( 'FROM', $sql );
-			$max_pages_sql = 'SELECT COUNT(*) FROM' . $pieces[1];
-			$pieces = explode( ' ORDER ', $max_pages_sql );
-			$max_pages_sql = trim( $pieces[0] );
-
-			$found_posts = $wpdb->get_var( $max_pages_sql );
-			$wp_query->found_posts = intval( $found_posts );
-			$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
-
-			$posts_per_page = intval( $wp_query->query_vars['posts_per_page'] );
-			if ( ! $posts_per_page ) {
-				$posts_per_page = get_option( 'posts_per_page' );
-			}
-			$wp_query->max_num_pages = ceil( $wp_query->found_posts / $posts_per_page );
-
-			$paged = $q['paged'];
-			$new_paged = intval( $wp_query->max_num_pages - $paged );
-			$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
-
-			$this->new_paged = $new_paged;
-			$wp_query->query['paged'] = $new_paged;
-			// $wp_query->query_vars['paged'] = $new_paged;
-
-			$old_offset = ( $paged * $posts_per_page) - $posts_per_page;
-
-			$find = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
-			$replace =  'LIMIT ' . $new_offset . ', ' . $posts_per_page;
-			$sql = str_replace( $find, $replace, $sql );
-			/*
-			echo '<pre>';
-			var_dump( $paged, $new_paged );
-			// var_dump( $find, $replace );
-			// var_dump( $sql, $original_sql );
-			echo '</pre>';
-			*/
+		if ( ! $wp_query->is_main_query() ) {
+			return $sql;
 		}
+
+		$pieces = explode( 'FROM', $sql );
+		$max_pages_sql = 'SELECT COUNT(*) FROM' . $pieces[1];
+		$pieces = explode( ' ORDER ', $max_pages_sql );
+		$max_pages_sql = trim( $pieces[0] );
+
+		$found_posts = $wpdb->get_var( $max_pages_sql );
+		$wp_query->found_posts = intval( $found_posts );
+		$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
+
+		$posts_per_page = intval( $wp_query->query_vars['posts_per_page'] );
+		if ( ! $posts_per_page ) {
+			$posts_per_page = get_option( 'posts_per_page' );
+		}
+		$wp_query->max_num_pages = ceil( $wp_query->found_posts / $posts_per_page );
+
+		$paged = $q['paged'];
+		$new_paged = intval( $wp_query->max_num_pages - $paged );
+		$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
+
+		$this->new_paged = $new_paged;
+		$wp_query->query['paged'] = $new_paged;
+		// $wp_query->query_vars['paged'] = $new_paged;
+
+		$old_offset = ( $paged * $posts_per_page) - $posts_per_page;
+
+		$find = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
+		$replace =  'LIMIT ' . $new_offset . ', ' . $posts_per_page;
+		$sql = str_replace( $find, $replace, $sql );
+		/*
+		echo '<pre>';
+		var_dump( $paged, $new_paged );
+		// var_dump( $find, $replace );
+		// var_dump( $sql, $original_sql );
+		echo '</pre>';
+		*/
 
 		return $sql;
 	}
