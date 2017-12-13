@@ -9,6 +9,8 @@ Version: 0.1
 class WP_Reverse_Pagination {
 
 	private $new_paged = 0;
+	private $original_paged = 0;
+	private $max_num_pages = 0;
 
 	public function _construct() {}
 
@@ -34,7 +36,8 @@ class WP_Reverse_Pagination {
 	public function setup_filters() {
 		add_filter( 'redirect_canonical', array( $this, 'filter_redirect_canonical' ), 10, 2 );
 		add_filter( 'get_pagenum_link', array( $this, 'filter_get_pagenum_link' ) );
-		add_filter( 'posts_request', array( $this, 'filter_posts_request' ), 10 );
+		add_filter( 'paginate_links', array( $this, 'filter_get_pagenum_link' ) );
+		add_filter( 'posts_request', array( $this, 'filter_posts_request' ), 10, 2 );
 	}
 
 	// This will help in figuring out how to make this work https://ozthegreat.io/wordpress/wordpress-database-queries-speed-sql_calc_found_rows
@@ -86,12 +89,9 @@ class WP_Reverse_Pagination {
 	}
 
 	public function filter_redirect_canonical( $redirect_url, $requested_url ) {
-		global $paged;
 		if ( is_admin() ) {
 			return;
 		}
-
-		$paged = $this->new_paged;
 
 		if ( stristr( $requested_url, '/page/1/' ) ) {
 			return $requested_url;
@@ -143,51 +143,61 @@ class WP_Reverse_Pagination {
 		return $result;
 	}
 
-	public function filter_posts_request( $sql ) {
-		global $wp_query, $wpdb;
-
-		$original_sql = $sql;
-		$q = $wp_query->query_vars;
+	public function filter_posts_request( $sql, $wp_query ) {
+		global $wpdb;
 
 		if ( ! $wp_query->is_main_query() ) {
 			return $sql;
 		}
 
-		$pieces = explode( 'FROM', $sql );
-		$max_pages_sql = 'SELECT COUNT(*) FROM' . $pieces[1];
+		$original_sql = $sql;
+		$q = $wp_query->query_vars;
+
+		// Get the conditionals after the first FROM in the SQL statement
+		$pieces = explode( 'FROM', $sql, $limit = 2 );
+		$conditionals = $pieces[1];
+
+		// Figure out how many total posts there are for this query
+		$max_pages_sql = 'SELECT COUNT(*) FROM' . $conditionals;
+
+		// The ORDER clause is undeeded for just a count
 		$pieces = explode( ' ORDER ', $max_pages_sql );
 		$max_pages_sql = trim( $pieces[0] );
 
+		// Remove GROUP BY clause used in taxonomy queries
+		$pieces = explode( ' GROUP BY ', $max_pages_sql );
+		$max_pages_sql = trim( $pieces[0] );
 		$found_posts = $wpdb->get_var( $max_pages_sql );
+
+		// Set how many found posts there are since we know it now
 		$wp_query->found_posts = intval( $found_posts );
 		$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
 
-		$posts_per_page = intval( $wp_query->query_vars['posts_per_page'] );
+		// Set the max number of pages
+		$posts_per_page = intval( $q['posts_per_page'] );
 		if ( ! $posts_per_page ) {
 			$posts_per_page = get_option( 'posts_per_page' );
 		}
 		$wp_query->max_num_pages = ceil( $wp_query->found_posts / $posts_per_page );
 
 		$paged = $q['paged'];
-		$new_paged = intval( $wp_query->max_num_pages - $paged );
+		$new_paged = intval( $wp_query->max_num_pages - $paged ) + 1;
+		if ( $paged == 0 ) {
+			$new_paged = intval( $wp_query->max_num_pages );
+		}
 		$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
 
+		$this->max_num_pages = intval( $wp_query->max_num_pages );
 		$this->new_paged = $new_paged;
-		$wp_query->query['paged'] = $new_paged;
+		$this->original_paged = $paged;
+		// $wp_query->query['paged'] = $new_paged;
 		// $wp_query->query_vars['paged'] = $new_paged;
 
 		$old_offset = ( $paged * $posts_per_page) - $posts_per_page;
 
 		$find = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
-		$replace =  'LIMIT ' . $new_offset . ', ' . $posts_per_page;
+		$replace = 'LIMIT ' . $new_offset . ', ' . $posts_per_page;
 		$sql = str_replace( $find, $replace, $sql );
-		/*
-		echo '<pre>';
-		var_dump( $paged, $new_paged );
-		// var_dump( $find, $replace );
-		// var_dump( $sql, $original_sql );
-		echo '</pre>';
-		*/
 
 		return $sql;
 	}
