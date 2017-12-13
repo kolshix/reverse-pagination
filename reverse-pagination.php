@@ -12,16 +12,67 @@ class WP_Reverse_Pagination {
 
 	public function _construct() {}
 
-	public function setup() {
-		add_filter( 'redirect_canonical', array( $this, 'redirect_canonical' ), 10, 2 );
-		add_filter( 'get_pagenum_link', array( $this, 'get_pagenum_link' ) );
-
-		add_action( 'pre_get_posts', array( $this, 'pre_get_posts_min' ) );
-		add_filter( 'posts_request', array( $this, 'posts_request' ), 10 );
-		add_action( 'wp_head', array( $this, 'set_the_new_paged' ), 1 );
+	/**
+	 * Get an instance of this class
+	 */
+	public static function get_instance() {
+		static $instance = null;
+		if ( null === $instance ) {
+			$instance = new static();
+			$instance->setup_actions();
+			$instance->setup_filters();
+		}
+		return $instance;
 	}
 
-	public function redirect_canonical($redirect_url, $requested_url) {
+	public function setup_actions() {
+		add_action( 'pre_get_posts', array( $this, 'action_pre_get_posts' ) );
+		add_action( 'wp_head', array( $this, 'action_wp_head' ), 1 );
+	}
+
+	public function setup_filters() {
+		add_filter( 'redirect_canonical', array( $this, 'filter_redirect_canonical' ), 10, 2 );
+		add_filter( 'get_pagenum_link', array( $this, 'filter_get_pagenum_link' ) );
+		add_filter( 'posts_request', array( $this, 'filter_posts_request' ), 10 );
+	}
+
+	// This will help in figuring out how to make this work https://ozthegreat.io/wordpress/wordpress-database-queries-speed-sql_calc_found_rows
+	public function action_pre_get_posts( $wp_query ) {
+		global $wpdb;
+		if( is_admin() ) {
+			return $wp_query;
+		}
+
+		$q = $wp_query->query_vars;
+
+		if( $wp_query->is_main_query() ) {
+
+			$wp_query->query_vars['no_found_rows'] = 1;
+
+
+			$order = strtoupper( $q['order'] );
+			if(
+				empty( $q['order'] ) ||
+				( $order != 'DESC' && $order != 'ASC' )
+			) {
+				$q['order'] = 'ASC';
+			}
+			if( !$q['paged'] ) {
+				// $q['order'] = 'DESC';
+			}
+
+			// $wp_query->set( 'order', $q['order'] );
+
+		}
+	}
+
+	public function action_wp_head() {
+		if( is_main_query() ) {
+			set_query_var( 'paged', $this->new_paged );
+		}
+	}
+
+	public function filter_redirect_canonical($redirect_url, $requested_url) {
 		global $paged;
 		if( is_admin() ) {
 			return;
@@ -36,7 +87,7 @@ class WP_Reverse_Pagination {
 		return $redirect_url;
 	}
 
-	public function get_pagenum_link( $result ) {
+	public function filter_get_pagenum_link( $result ) {
 		global $paged, $wp_query, $wp_rewrite;
 
 		$old_paged = $wp_query->max_num_pages - $paged;
@@ -79,37 +130,7 @@ class WP_Reverse_Pagination {
 		return $result;
 	}
 
-	// This will help in figuring out how to make this work https://ozthegreat.io/wordpress/wordpress-database-queries-speed-sql_calc_found_rows
-	public function pre_get_posts_min( $wp_query ) {
-		global $wpdb;
-		if( is_admin() ) {
-			return $wp_query;
-		}
-
-		$q = $wp_query->query_vars;
-
-		if( $wp_query->is_main_query() ) {
-
-			$wp_query->query_vars['no_found_rows'] = 1;
-
-
-			$order = strtoupper( $q['order'] );
-			if(
-				empty( $q['order'] ) ||
-				( $order != 'DESC' && $order != 'ASC' )
-			) {
-		 		$q['order'] = 'ASC';
-		 	}
-		 	if( !$q['paged'] ) {
-				// $q['order'] = 'DESC';
-		 	}
-
-			// $wp_query->set( 'order', $q['order'] );
-
-		}
-	}
-
-	public function posts_request( $sql ) {
+	public function filter_posts_request( $sql ) {
 		global $wp_query, $wpdb;
 
 		$original_sql = $sql;
@@ -124,7 +145,7 @@ class WP_Reverse_Pagination {
 
 			$found_posts = $wpdb->get_var( $max_pages_sql );
 			$wp_query->found_posts = intval( $found_posts );
-    		$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
+			$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
 
 			$posts_per_page = intval( $wp_query->query_vars['posts_per_page'] );
 			if( !$posts_per_page ) {
@@ -157,13 +178,7 @@ class WP_Reverse_Pagination {
 		return $sql;
 	}
 
-	public function set_the_new_paged() {
-		if( is_main_query() ) {
-			set_query_var( 'paged', $this->new_paged );
-		}
-	}
-
 }
 
-$wp_reverse_pagination = new WP_Reverse_Pagination();
-$wp_reverse_pagination->setup();
+// Kick things off!
+WP_Reverse_Pagination::get_instance();
