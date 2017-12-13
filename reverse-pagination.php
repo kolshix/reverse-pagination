@@ -27,6 +27,7 @@ class WP_Reverse_Pagination {
 
 	public function setup_actions() {
 		add_action( 'pre_get_posts', array( $this, 'action_pre_get_posts' ) );
+		add_action( 'template_redirect', array( $this, 'action_template_redirect' ) );
 		add_action( 'wp_head', array( $this, 'action_wp_head' ), 1 );
 	}
 
@@ -54,6 +55,28 @@ class WP_Reverse_Pagination {
 		}
 
 		// $wp_query->set( 'order', $q['order'] );
+	}
+
+	public function action_template_redirect() {
+
+		// When the requested paged value == the max_num_pages value then perform
+		// a redirect to the non /page/ version of the URL for SEO reasons
+		if ( $this->original_paged == $this->max_num_pages ) {
+			$url = false;
+			// Build the URL in the address bar
+			if ( isset( $_SERVER['HTTP_HOST'] ) ) {
+				$url  = is_ssl() ? 'https://' : 'http://';
+				$url .= $_SERVER['HTTP_HOST'];
+				$url .= $_SERVER['REQUEST_URI'];
+			}
+			if ( ! $url ) {
+				return;
+			}
+
+			$redirect = str_replace( '/page/' . $this->original_paged . '/', '', $url );
+			wp_safe_redirect( $redirect, 301 );
+			exit;
+		}
 	}
 
 	public function action_wp_head() {
