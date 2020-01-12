@@ -8,9 +8,9 @@ Version: 0.1
 
 class WP_Reverse_Pagination {
 
-	private $new_paged = 0;
+	private $new_paged      = 0;
 	private $original_paged = 0;
-	private $max_num_pages = 0;
+	private $max_num_pages  = 0;
 
 	public function _construct() {}
 
@@ -106,23 +106,23 @@ class WP_Reverse_Pagination {
 		}
 
 		$original_sql = $sql;
-		$q = $wp_query->query_vars;
+		$q            = $wp_query->query_vars;
 
 		// Get the conditionals after the first FROM in the SQL statement
-		$pieces = explode( 'FROM', $sql, $limit = 2 );
+		$pieces       = explode( 'FROM', $sql, $limit = 2 );
 		$conditionals = $pieces[1];
 
 		// Figure out how many total posts there are for this query
 		$max_pages_sql = 'SELECT COUNT(*) FROM' . $conditionals;
 
 		// The ORDER clause is undeeded for just a count
-		$pieces = explode( ' ORDER ', $max_pages_sql );
+		$pieces        = explode( ' ORDER ', $max_pages_sql );
 		$max_pages_sql = trim( $pieces[0] );
 
 		// Remove GROUP BY clause used in taxonomy queries
-		$pieces = explode( ' GROUP BY ', $max_pages_sql );
+		$pieces        = explode( ' GROUP BY ', $max_pages_sql );
 		$max_pages_sql = trim( $pieces[0] );
-		$found_posts = $wpdb->get_var( $max_pages_sql );
+		$found_posts   = $wpdb->get_var( $max_pages_sql );
 
 		// Set how many found posts there are since we know it now
 		$wp_query->found_posts = intval( $found_posts );
@@ -135,24 +135,24 @@ class WP_Reverse_Pagination {
 		}
 		$wp_query->max_num_pages = ceil( $wp_query->found_posts / $posts_per_page );
 
-		$paged = $q['paged'];
+		$paged     = $q['paged'];
 		$new_paged = intval( $wp_query->max_num_pages - $paged ) + 1;
 		if ( $paged == 0 ) {
 			$new_paged = intval( $wp_query->max_num_pages );
 		}
 		$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
 
-		$this->max_num_pages = intval( $wp_query->max_num_pages );
-		$this->new_paged = $new_paged;
+		$this->max_num_pages  = intval( $wp_query->max_num_pages );
+		$this->new_paged      = $new_paged;
 		$this->original_paged = $paged;
 		// $wp_query->query['paged'] = $new_paged;
 		// $wp_query->query_vars['paged'] = $new_paged;
 
-		$old_offset = ( $paged * $posts_per_page) - $posts_per_page;
+		$old_offset = ( $paged * $posts_per_page ) - $posts_per_page;
 
-		$find = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
+		$find    = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
 		$replace = 'LIMIT ' . $new_offset . ', ' . $posts_per_page;
-		$sql = str_replace( $find, $replace, $sql );
+		$sql     = str_replace( $find, $replace, $sql );
 
 		return $sql;
 	}
@@ -208,7 +208,7 @@ function reverse_paginate_links( $args = '' ) {
 	// Merge additional query vars found in the original URL into 'add_args' array.
 	if ( isset( $url_parts[1] ) ) {
 		// Find the format argument.
-		$format = explode( '?', str_replace( '%_%', $args['format'], $args['base'] ) );
+		$format       = explode( '?', str_replace( '%_%', $args['format'], $args['base'] ) );
 		$format_query = isset( $format[1] ) ? $format[1] : '';
 		wp_parse_str( $format_query, $format_args );
 
@@ -237,16 +237,17 @@ function reverse_paginate_links( $args = '' ) {
 	if ( $mid_size < 0 ) {
 		$mid_size = 2;
 	}
-	$add_args = $args['add_args'];
-	$r = '';
+	$add_args   = $args['add_args'];
+	$r          = '';
 	$page_links = array();
-	$dots = false;
+	$dots       = false;
 
 	if ( $args['prev_next'] && $current && $current < $total ) :
 		$link = str_replace( '%_%', $total - 1 == $current ? '' : $args['format'], $args['base'] );
 		$link = str_replace( '%#%', $current + 1, $link );
-		if ( $add_args )
+		if ( $add_args ) {
 			$link = add_query_arg( $add_args, $link );
+		}
 		$link .= $args['add_fragment'];
 
 		/**
@@ -260,8 +261,8 @@ function reverse_paginate_links( $args = '' ) {
 	endif;
 	for ( $n = $total; $n >= 1; $n-- ) :
 		if ( $n == $current ) :
-			$page_links[] = "<span aria-current='" . esc_attr( $args['aria_current'] ) . "' class='page-numbers current'>" . $args['before_page_number'] . number_format_i18n( $n ) . $args['after_page_number'] . "</span>";
-			$dots = true;
+			$page_links[] = "<span aria-current='" . esc_attr( $args['aria_current'] ) . "' class='page-numbers current'>" . $args['before_page_number'] . number_format_i18n( $n ) . $args['after_page_number'] . '</span>';
+			$dots         = true;
 		else :
 			// This logic is weird and needs reworking
 			if (
@@ -278,41 +279,43 @@ function reverse_paginate_links( $args = '' ) {
 			) :
 				$link = str_replace( '%_%', $total == $n ? '' : $args['format'], $args['base'] );
 				$link = str_replace( '%#%', $n, $link );
-				if ( $add_args )
+				if ( $add_args ) {
 					$link = add_query_arg( $add_args, $link );
+				}
 				$link .= $args['add_fragment'];
 
 				/** This filter is documented in wp-includes/general-template.php */
-				$page_links[] = "<a class='page-numbers' href='" . esc_url( apply_filters( 'paginate_links', $link ) ) . "'>" . $args['before_page_number'] . number_format_i18n( $n ) . $args['after_page_number'] . "</a>";
-				$dots = true;
+				$page_links[] = "<a class='page-numbers' href='" . esc_url( apply_filters( 'paginate_links', $link ) ) . "'>" . $args['before_page_number'] . number_format_i18n( $n ) . $args['after_page_number'] . '</a>';
+				$dots         = true;
 			elseif ( $dots && ! $args['show_all'] ) :
 				$page_links[] = '<span class="page-numbers dots">' . __( '&hellip;' ) . '</span>';
-				$dots = false;
+				$dots         = false;
 			endif;
 		endif;
 	endfor;
 	if ( $args['prev_next'] && $current && 1 < $current ) :
 		$link = str_replace( '%_%', $args['format'], $args['base'] );
 		$link = str_replace( '%#%', $current - 1, $link );
-		if ( $add_args )
+		if ( $add_args ) {
 			$link = add_query_arg( $add_args, $link );
+		}
 		$link .= $args['add_fragment'];
 
 		/** This filter is documented in wp-includes/general-template.php */
 		$page_links[] = '<a class="next page-numbers" href="' . esc_url( apply_filters( 'paginate_links', $link ) ) . '">' . $args['prev_text'] . '</a>';
 	endif;
 	switch ( $args['type'] ) {
-		case 'array' :
+		case 'array':
 			return $page_links;
 
-		case 'list' :
+		case 'list':
 			$r .= "<ul class='page-numbers'>\n\t<li>";
-			$r .= join("</li>\n\t<li>", $page_links);
+			$r .= join( "</li>\n\t<li>", $page_links );
 			$r .= "</li>\n</ul>\n";
 			break;
 
-		default :
-			$r = join("\n", $page_links);
+		default:
+			$r = join( "\n", $page_links );
 			break;
 	}
 	return $r;
