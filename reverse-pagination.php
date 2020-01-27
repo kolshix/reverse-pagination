@@ -3,16 +3,39 @@
 Plugin Name: WP Reverse Pagination
 Description: Pagination starts higher and goes lower for more consistent archive page numbering.
 Author: Russell Heimlich
-Version: 0.1
+Version: 0.2
 */
 
+/**
+ * Logic to make WordPress work with reverse pagination
+ */
 class WP_Reverse_Pagination {
 
-	private $new_paged      = 0;
-	private $original_paged = 0;
-	private $max_num_pages  = 0;
+	/**
+	 * Once we figure out what the new paged value should be we can store it here for future uses
+	 *
+	 * @var integer
+	 */
+	private $new_paged = 0;
 
-	public function _construct() {}
+	/**
+	 * Stores the original paged value of the current request
+	 *
+	 * @var integer
+	 */
+	private $original_paged = 0;
+
+	/**
+	 * Store the maximum number of pages value once it has been calculated
+	 *
+	 * @var integer
+	 */
+	private $max_num_pages = 0;
+
+	/**
+	 * Empty constructor
+	 */
+	public function construct() {}
 
 	/**
 	 * Get an instance of this class
@@ -27,66 +50,52 @@ class WP_Reverse_Pagination {
 		return $instance;
 	}
 
+	/**
+	 * Hook into WordPress via actions
+	 */
 	public function setup_actions() {
-		add_action( 'pre_get_posts', array( $this, 'action_pre_get_posts' ) );
 		add_action( 'template_redirect', array( $this, 'action_template_redirect' ) );
-		add_action( 'wp_head', array( $this, 'action_wp_head' ), 1 );
 	}
 
+	/**
+	 * Hook into WordPress via filters
+	 */
 	public function setup_filters() {
 		add_filter( 'redirect_canonical', array( $this, 'filter_redirect_canonical' ), 10, 2 );
-		add_filter( 'posts_request', array( $this, 'filter_posts_request' ), 10, 2 );
+		add_filter( 'posts_clauses_request', array( $this, 'filter_posts_clauses_request' ), 10, 2 );
 	}
 
-	// This will help in figuring out how to make this work https://ozthegreat.io/wordpress/wordpress-database-queries-speed-sql_calc_found_rows
-	public function action_pre_get_posts( $query ) {
-		global $wpdb;
-		if ( is_admin() || ! $query->is_main_query() ) {
-			return $query;
-		}
-
-		$q = $query->query_vars;
-		$query->set( 'no_found_rows', 1 );
-
-		if ( empty( $q['order'] ) || strtoupper( $q['order'] ) != 'DESC' ) {
-			$q['order'] = 'ASC';
-		}
-		if ( ! $q['paged'] ) {
-			// $q['order'] = 'DESC';
-		}
-
-		// $wp_query->set( 'order', $q['order'] );
-	}
-
+	/**
+	 * Redirect to the non /page/ URL if the current $paged value === the max num pages value
+	 */
 	public function action_template_redirect() {
+		global $wp;
 
 		// When the requested paged value == the max_num_pages value then perform
-		// a redirect to the non /page/ version of the URL for SEO reasons
-		if ( $this->original_paged == $this->max_num_pages ) {
-			$url = false;
-			// Build the URL in the address bar
-			if ( isset( $_SERVER['HTTP_HOST'] ) ) {
-				$url  = is_ssl() ? 'https://' : 'http://';
-				$url .= $_SERVER['HTTP_HOST'];
-				$url .= $_SERVER['REQUEST_URI'];
-			}
+		// a redirect to the non /page/ version of the URL for SEO reasons.
+		if ( intval( $this->original_paged ) === intval( $this->max_num_pages ) ) {
+			// Get the URL of the current request.
+			$url = home_url( $wp->request );
+			$url = add_query_arg( array( $_GET ), trailingslashit( $url ) );
 			if ( ! $url ) {
 				return;
 			}
 
 			$redirect = str_replace( '/page/' . $this->original_paged . '/', '', $url );
-			wp_safe_redirect( $redirect, 301 );
-			exit;
+			if ( $url !== $redirect ) {
+				wp_safe_redirect( $redirect, 302 );
+				exit;
+			}
 		}
 	}
 
-	public function action_wp_head() {
-		if ( is_main_query() ) {
-			// set_query_var( 'paged', $this->new_paged );
-		}
-	}
-
-	public function filter_redirect_canonical( $redirect_url, $requested_url ) {
+	/**
+	 * Undo some default redirects that WordPress provides
+	 *
+	 * @param string $redirect_url  The URL to be redirected to.
+	 * @param string $requested_url The URL being requested.
+	 */
+	public function filter_redirect_canonical( $redirect_url = '', $requested_url = '' ) {
 		if ( is_admin() ) {
 			return;
 		}
@@ -95,73 +104,91 @@ class WP_Reverse_Pagination {
 			return $requested_url;
 		}
 
+		if ( stristr( $redirect_url, '/page/' . $this->new_paged . '/' ) ) {
+			return $requested_url;
+		}
+
 		return $redirect_url;
 	}
 
-	public function filter_posts_request( $sql, $wp_query ) {
+	/**
+	 * Figure out the proper pagination values and modify SQL clauses to make everything work.
+	 *
+	 * @param array    $clauses The SQL clauses being modified.
+	 * @param WP_Query $wp_query The WP_Query being processed.
+	 */
+	public function filter_posts_clauses_request( $clauses = array(), $wp_query ) {
 		global $wpdb;
 
-		if ( ! $wp_query->is_main_query() ) {
-			return $sql;
+		if ( is_admin() || ! $wp_query->is_main_query() ) {
+			return $clauses;
 		}
 
-		$original_sql = $sql;
-		$q            = $wp_query->query_vars;
+		// Setup variables.
+		$q       = $wp_query->query_vars;
+		$where   = $clauses['where'];
+		$groupby = $clauses['groupby'];
+		if ( ! empty( $groupby ) ) {
+			$groupby = 'GROUP BY ' . $groupby;
+		}
+		$join     = $clauses['join'];
+		$orderby  = $clauses['orderby'];
+		$distinct = $clauses['distinct'];
+		$fields   = $clauses['fields'];
+		$limits   = $clauses['limits'];
 
-		// Get the conditionals after the first FROM in the SQL statement
-		$pieces       = explode( 'FROM', $sql, $limit = 2 );
-		$conditionals = $pieces[1];
+		// Figure out how many rows we have.
+		$found_posts = $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} $join WHERE 1=1 $where $groupby ORDER BY $orderby" );
 
-		// Figure out how many total posts there are for this query
-		$max_pages_sql = 'SELECT COUNT(*) FROM' . $conditionals;
-
-		// The ORDER clause is undeeded for just a count
-		$pieces        = explode( ' ORDER ', $max_pages_sql );
-		$max_pages_sql = trim( $pieces[0] );
-
-		// Remove GROUP BY clause used in taxonomy queries
-		$pieces        = explode( ' GROUP BY ', $max_pages_sql );
-		$max_pages_sql = trim( $pieces[0] );
-		$found_posts   = $wpdb->get_var( $max_pages_sql );
-
-		// Set how many found posts there are since we know it now
+		// Set how many found posts there are since we know it now.
 		$wp_query->found_posts = intval( $found_posts );
 		$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
 
-		// Set the max number of pages
+		// Set the max number of pages.
 		$posts_per_page = intval( $q['posts_per_page'] );
 		if ( ! $posts_per_page ) {
 			$posts_per_page = get_option( 'posts_per_page' );
 		}
 		$wp_query->max_num_pages = ceil( $wp_query->found_posts / $posts_per_page );
+		$this->max_num_pages     = $wp_query->max_num_pages;
 
+		// Save a database query.
+		$wp_query->query_vars['no_found_rows'] = true;
+
+		// Get the current page being paginated.
 		$paged     = $q['paged'];
 		$new_paged = intval( $wp_query->max_num_pages - $paged ) + 1;
-		if ( $paged == 0 ) {
+		if ( 0 === $paged ) {
 			$new_paged = intval( $wp_query->max_num_pages );
 		}
-		$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
-
-		$this->max_num_pages  = intval( $wp_query->max_num_pages );
-		$this->new_paged      = $new_paged;
 		$this->original_paged = $paged;
-		// $wp_query->query['paged'] = $new_paged;
-		// $wp_query->query_vars['paged'] = $new_paged;
+		$this->new_paged      = $new_paged;
 
-		$old_offset = ( $paged * $posts_per_page ) - $posts_per_page;
+		// Calculate the new offset.
+		$new_offset = ( $wp_query->max_num_pages - $paged ) * $posts_per_page;
+		if ( 0 === $paged ) {
+			$new_offset = 0;
+		}
 
-		$find    = 'LIMIT ' . $old_offset . ', ' . $posts_per_page;
-		$replace = 'LIMIT ' . $new_offset . ', ' . $posts_per_page;
-		$sql     = str_replace( $find, $replace, $sql );
+		// Set the new limit clause if it is a positive number (otherwise a negative number indicates a 404).
+		if ( $new_offset >= 0 ) {
+			$clauses['limits'] = 'LIMIT ' . $new_offset . ', ' . $posts_per_page;
+		}
 
-		return $sql;
+		return $clauses;
 	}
-
 }
 
 // Kick things off!
 WP_Reverse_Pagination::get_instance();
 
+/**
+ * Display a list of pagination links based on the current query
+ *
+ * @see paginate_links()
+ *
+ * @param string $args Args to modify the output.
+ */
 function reverse_paginate_links( $args = '' ) {
 	global $wp_query, $wp_rewrite;
 
@@ -181,7 +208,7 @@ function reverse_paginate_links( $args = '' ) {
 	$format .= $wp_rewrite->using_permalinks() ? user_trailingslashit( $wp_rewrite->pagination_base . '/%#%', 'paged' ) : '?paged=%#%';
 
 	$defaults = array(
-		'base'               => $pagenum_link, // http://example.com/all_posts.php%_% : %_% is replaced by format (below)
+		'base'               => $pagenum_link, // http://example.com/all_posts.php%_% : %_% is replaced by format (below).
 		'format'             => $format, // ?page=%#% : %#% is replaced by the page number
 		'total'              => $total,
 		'current'            => $current,
@@ -193,7 +220,7 @@ function reverse_paginate_links( $args = '' ) {
 		'end_size'           => 1,
 		'mid_size'           => 2,
 		'type'               => 'plain',
-		'add_args'           => array(), // array of query args to add
+		'add_args'           => array(), // array of query args to add.
 		'add_fragment'       => '',
 		'before_page_number' => '',
 		'after_page_number'  => '',
@@ -223,7 +250,7 @@ function reverse_paginate_links( $args = '' ) {
 		$args['add_args'] = array_merge( $args['add_args'], urlencode_deep( $url_query_args ) );
 	}
 
-	// Who knows what else people pass in $args
+	// Who knows what else people pass in $args.
 	$total = (int) $args['total'];
 	if ( $total < 2 ) {
 		return;
@@ -243,7 +270,7 @@ function reverse_paginate_links( $args = '' ) {
 	$dots       = false;
 
 	if ( $args['prev_next'] && $current && $current < $total ) :
-		$link = str_replace( '%_%', $total - 1 == $current ? '' : $args['format'], $args['base'] );
+		$link = str_replace( '%_%', $total - 1 === $current ? '' : $args['format'], $args['base'] );
 		$link = str_replace( '%#%', $current + 1, $link );
 		if ( $add_args ) {
 			$link = add_query_arg( $add_args, $link );
@@ -260,11 +287,11 @@ function reverse_paginate_links( $args = '' ) {
 		$page_links[] = '<a class="prev page-numbers" href="' . esc_url( apply_filters( 'paginate_links', $link ) ) . '">' . $args['next_text'] . '</a>';
 	endif;
 	for ( $n = $total; $n >= 1; $n-- ) :
-		if ( $n == $current ) :
+		if ( $n === $current ) :
 			$page_links[] = "<span aria-current='" . esc_attr( $args['aria_current'] ) . "' class='page-numbers current'>" . $args['before_page_number'] . number_format_i18n( $n ) . $args['after_page_number'] . '</span>';
 			$dots         = true;
 		else :
-			// This logic is weird and needs reworking
+			// This logic is weird and needs reworking.
 			if (
 				$args['show_all']
 				|| (
@@ -277,7 +304,7 @@ function reverse_paginate_links( $args = '' ) {
 					|| $n > $total - $end_size
 				)
 			) :
-				$link = str_replace( '%_%', $total == $n ? '' : $args['format'], $args['base'] );
+				$link = str_replace( '%_%', $total === $n ? '' : $args['format'], $args['base'] );
 				$link = str_replace( '%#%', $n, $link );
 				if ( $add_args ) {
 					$link = add_query_arg( $add_args, $link );
