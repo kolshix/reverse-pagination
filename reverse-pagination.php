@@ -143,6 +143,11 @@ class WP_Reverse_Pagination {
 		// Set how many found posts there are since we know it now.
 		$wp_query->found_posts = intval( $found_posts );
 		$wp_query->found_posts = apply_filters_ref_array( 'found_posts', array( $wp_query->found_posts, &$wp_query ) );
+		
+		// Set how many found posts if is archive or other taxonomy pages
+		if ( get_queried_object()->term_id > 0 ){
+			$wp_query->found_posts = get_term( get_queried_object()->term_id )->count;
+		}
 
 		// Set the max number of pages.
 		$posts_per_page = intval( $q['posts_per_page'] );
